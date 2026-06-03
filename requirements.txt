@@ -1,0 +1,6 @@
+kaggle==2.2.0
+kaggle-environments==1.29.3
+numpy==2.4.6
+pandas==3.0.3
+pytest==9.0.3
+tqdm==4.67.3

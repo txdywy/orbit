@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+kaggle/orbit-wars/orbit-wars.zip
+reports/*.csv
+submissions/*.tar.gz
