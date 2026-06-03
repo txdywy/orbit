@@ -68,7 +68,7 @@ def test_agent_overcommits_enough_ships_for_speed_on_good_targets():
     assert moves[0][2] >= 35
 
 
-def test_agent_prefers_static_targets_during_opening():
+def test_agent_prefers_fast_high_value_targets_during_opening():
     observation = obs(
         [
             [0, 0, 20.0, 20.0, 2.0, 100, 4],
@@ -81,4 +81,54 @@ def test_agent_prefers_static_targets_during_opening():
     moves = main.agent(observation)
 
     assert moves
+    assert abs(moves[0][1] - math.atan2(20.0 - 20.0, 40.0 - 20.0)) < 0.2
+
+
+def test_agent_prioritizes_enemy_planet_after_opening():
+    observation = obs(
+        [
+            [0, 0, 20.0, 20.0, 2.0, 130, 4],
+            [1, -1, 40.0, 20.0, 2.6, 8, 3],
+            [2, 1, 20.0, 90.0, 2.6, 12, 5],
+        ],
+        step=180,
+    )
+
+    moves = main.agent(observation)
+
+    assert moves
     assert abs(moves[0][1] - math.atan2(90.0 - 20.0, 20.0 - 20.0)) < 0.2
+
+
+def test_agent_preserves_more_ships_when_source_is_threatened():
+    base = [
+        [0, 0, 20.0, 20.0, 2.0, 100, 4],
+        [1, -1, 20.0, 90.0, 2.6, 8, 3],
+    ]
+    unthreatened = obs(base, step=120)
+    threatened = obs(
+        base,
+        fleets=[[99, 1, 20.0, 70.0, -math.pi / 2, 2, 45]],
+        step=120,
+    )
+
+    normal_moves = main.agent(unthreatened)
+    threatened_moves = main.agent(threatened)
+
+    assert normal_moves and threatened_moves
+    assert threatened_moves[0][2] < normal_moves[0][2]
+
+
+def test_agent_uses_larger_opening_fleets_for_speed():
+    observation = obs(
+        [
+            [0, 0, 20.0, 20.0, 2.0, 45, 4],
+            [1, -1, 35.0, 20.0, 1.5, 5, 2],
+        ],
+        step=25,
+    )
+
+    moves = main.agent(observation)
+
+    assert moves
+    assert moves[0][2] >= 14

@@ -6,3 +6,5 @@ __pycache__/
 kaggle/orbit-wars/orbit-wars.zip
 reports/*.csv
 submissions/*.tar.gz
+logs/
+replays/

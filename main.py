@@ -79,6 +79,34 @@ def incoming_ships_to_owned_planets(fleets, my_planet_ids, player):
     return incoming
 
 
+def fleet_hits_planet(fleet, planet):
+    start = (fleet.x, fleet.y)
+    end = (
+        fleet.x + math.cos(fleet.angle) * 130.0,
+        fleet.y + math.sin(fleet.angle) * 130.0,
+    )
+    return point_to_segment_distance((planet.x, planet.y), start, end) <= planet.radius + 0.6
+
+
+def enemy_pressure_by_planet(fleets, my_planets, player):
+    pressure = {p.id: 0 for p in my_planets}
+    for fleet in fleets:
+        if fleet.owner in (-1, player):
+            continue
+        best_planet = None
+        best_distance = float("inf")
+        for planet in my_planets:
+            if not fleet_hits_planet(fleet, planet):
+                continue
+            distance_to_planet = dist((fleet.x, fleet.y), (planet.x, planet.y))
+            if distance_to_planet < best_distance:
+                best_distance = distance_to_planet
+                best_planet = planet
+        if best_planet is not None:
+            pressure[best_planet.id] += fleet.ships
+    return pressure
+
+
 def capture_need(target, owner_is_enemy, travel_turns):
     need = int(target.ships) + 1
     if owner_is_enemy:
@@ -101,11 +129,11 @@ def target_value(source, target, player, step, initial_by_id, angular_velocity, 
     if line_crosses_sun(source_pos, future_pos):
         return None
 
-    enemy_bonus = 18.0 if target.owner not in (-1, player) else 0.0
+    enemy_bonus = 62.0 if target.owner not in (-1, player) else 0.0
     comet_bonus = 7.0 if target.id in comet_ids else 0.0
-    static_bonus = 6.0 if not is_orbiting(target) else -3.0
-    production_value = target.production * 28.0
-    cost = target.ships * 1.35 + distance_now * 0.72
+    static_bonus = 3.0 if not is_orbiting(target) else 0.0
+    production_value = target.production * (36.0 if step < 100 else 30.0)
+    cost = target.ships * (1.15 if step < 100 else 1.35) + distance_now * (1.05 if step < 80 else 0.72)
     return production_value + enemy_bonus + comet_bonus + static_bonus - cost
 
 
@@ -115,24 +143,32 @@ def choose_target(source, targets, player, step, initial_by_id, angular_velocity
     for target in targets:
         if target.id == source.id:
             continue
+        if step >= 130 and target.owner not in (-1, player):
+            score_bias = 45.0
+        else:
+            score_bias = 0.0
         rough_distance = dist((source.x, source.y), (target.x, target.y))
-        rough_travel = rough_distance / fleet_speed(max(1, min(available, max(2, target.ships + 1))))
-        need = capture_need(target, target.owner not in (-1, player), rough_travel)
-        if need > available:
-            continue
-        commit_ratio = 0.42
+        commit_ratio = 0.38 if step < 90 else 0.42
         if target.production >= 4:
             commit_ratio = 0.56
         if target.owner not in (-1, player):
             commit_ratio = max(commit_ratio, 0.64)
         if step > 360:
             commit_ratio = max(commit_ratio, 0.72)
-        committed = min(available, max(need, int(available * commit_ratio)))
+        planned_commit = max(1, int(available * commit_ratio))
+        rough_travel = rough_distance / fleet_speed(min(available, planned_commit))
+        need = capture_need(target, target.owner not in (-1, player), rough_travel)
+        if need > available:
+            continue
+        committed = min(available, max(need, planned_commit))
         score = target_value(
             source, target, player, step, initial_by_id, angular_velocity, comet_ids, committed
         )
         if score is None:
             continue
+        if step < 100 and target.owner == -1:
+            score += 34.0
+        score += score_bias
         score -= max(0, need - target.production * 8) * 0.18
         score += (fleet_speed(committed) - fleet_speed(need)) * 4.0
         if score > best_score:
@@ -162,39 +198,48 @@ def agent(obs):
     incoming_home = incoming_ships_to_owned_planets(
         fleets, {p.id for p in my_planets}, player
     )
+    pressure = enemy_pressure_by_planet(fleets, my_planets, player)
     moves = []
     claimed_targets = set()
 
     for source in sorted(my_planets, key=lambda p: (p.ships, p.production), reverse=True):
         reserve = max(7, int(source.production * 3.5))
         if step < 80:
-            reserve = max(5, int(source.production * 2.5))
+            reserve = max(3, int(source.production * 1.4))
+        reserve += int(pressure.get(source.id, 0) * 0.85)
         available = int(source.ships) - reserve
         if incoming_home.get(source.id, 0) > 0:
             available -= min(available, incoming_home[source.id] // 3)
         if available <= 0:
             continue
 
-        open_targets = [t for t in targets if t.id not in claimed_targets]
-        static_targets = [t for t in open_targets if not is_orbiting(t)]
-        if step < 240 and static_targets:
-            open_targets = static_targets
-        chosen = choose_target(
-            source, open_targets, player, step, initial_by_id, angular_velocity, comet_ids, available
-        )
-        if chosen is None:
-            continue
-        target, ships = chosen
-        aim = planet_position_at(
-            target,
-            initial_by_id,
-            angular_velocity,
-            step + int(round(dist((source.x, source.y), (target.x, target.y)) / fleet_speed(ships))),
-            comet_ids,
-        )
-        angle = math.atan2(aim[1] - source.y, aim[0] - source.x)
-        ships = max(1, min(int(ships), int(source.ships)))
-        moves.append([source.id, angle, ships])
-        claimed_targets.add(target.id)
+        launches = 0
+        max_launches = 2 if step < 90 else 1
+        while available > 0 and launches < max_launches:
+            open_targets = [t for t in targets if t.id not in claimed_targets]
+            enemy_targets = [t for t in open_targets if t.owner not in (-1, player)]
+            if step >= 130 and enemy_targets:
+                open_targets = enemy_targets
+            chosen = choose_target(
+                source, open_targets, player, step, initial_by_id, angular_velocity, comet_ids, available
+            )
+            if chosen is None:
+                break
+            target, ships = chosen
+            aim = planet_position_at(
+                target,
+                initial_by_id,
+                angular_velocity,
+                step + int(round(dist((source.x, source.y), (target.x, target.y)) / fleet_speed(ships))),
+                comet_ids,
+            )
+            angle = math.atan2(aim[1] - source.y, aim[0] - source.x)
+            ships = max(1, min(int(ships), int(source.ships) - sum(m[2] for m in moves if m[0] == source.id)))
+            if ships <= 0:
+                break
+            moves.append([source.id, angle, ships])
+            claimed_targets.add(target.id)
+            available -= ships
+            launches += 1
 
     return moves
