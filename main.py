@@ -143,7 +143,7 @@ def choose_target(source, targets, player, step, initial_by_id, angular_velocity
     for target in targets:
         if target.id == source.id:
             continue
-        if step >= 130 and target.owner not in (-1, player):
+        if step >= 70 and target.owner not in (-1, player):
             score_bias = 45.0
         else:
             score_bias = 0.0
@@ -151,11 +151,15 @@ def choose_target(source, targets, player, step, initial_by_id, angular_velocity
         commit_ratio = 0.38 if step < 90 else 0.42
         if target.production >= 4:
             commit_ratio = 0.56
+        if step < 140 and target.owner == -1 and not is_orbiting(target):
+            commit_ratio = max(commit_ratio, 0.62)
         if target.owner not in (-1, player):
             commit_ratio = max(commit_ratio, 0.64)
         if step > 360:
             commit_ratio = max(commit_ratio, 0.72)
         planned_commit = max(1, int(available * commit_ratio))
+        if step < 70 and available >= 22 and rough_distance >= 12:
+            planned_commit = max(planned_commit, 18)
         rough_travel = rough_distance / fleet_speed(min(available, planned_commit))
         need = capture_need(target, target.owner not in (-1, player), rough_travel)
         if need > available:
@@ -218,8 +222,13 @@ def agent(obs):
         while available > 0 and launches < max_launches:
             open_targets = [t for t in targets if t.id not in claimed_targets]
             enemy_targets = [t for t in open_targets if t.owner not in (-1, player)]
-            if step >= 130 and enemy_targets:
+            static_neutrals = [
+                t for t in open_targets if t.owner == -1 and not is_orbiting(t)
+            ]
+            if step >= 70 and enemy_targets:
                 open_targets = enemy_targets
+            elif step < 110 and static_neutrals:
+                open_targets = static_neutrals
             chosen = choose_target(
                 source, open_targets, player, step, initial_by_id, angular_velocity, comet_ids, available
             )
