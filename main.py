@@ -165,6 +165,8 @@ def choose_target(source, targets, player, step, initial_by_id, angular_velocity
         if need > available:
             continue
         committed = min(available, max(need, planned_commit))
+        if step < 45 and target.owner == -1 and rough_distance >= 18 and committed < 14:
+            continue
         score = target_value(
             source, target, player, step, initial_by_id, angular_velocity, comet_ids, committed
         )

@@ -145,4 +145,4 @@ def test_agent_waits_in_opening_instead_of_dribbling_tiny_long_range_fleets():
 
     moves = main.agent(observation)
 
-    assert moves
+    assert moves == []
