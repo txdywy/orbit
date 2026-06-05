@@ -1,0 +1,13 @@
+{
+  "id": "txdywy/orbit-wars-rl-agent",
+  "title": "Orbit Wars RL Agent",
+  "code_file": "rl_agent.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": ["orbit-wars"],
+  "kernel_sources": []
+}

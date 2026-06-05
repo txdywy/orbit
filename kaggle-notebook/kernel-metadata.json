@@ -1,0 +1,13 @@
+{
+  "id": "txdywy/orbit-wars-rl-training",
+  "title": "Orbit Wars RL Training",
+  "code_file": "rl_training.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": ["orbit-wars"],
+  "kernel_sources": []
+}

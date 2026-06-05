@@ -55,7 +55,7 @@ FOUR_PLAYER_ROTATING_TURN_LIMIT = 10
 COMET_MAX_CHASE_TURNS = 10
 
 # Scoring weights
-ATTACK_COST_TURN_WEIGHT = 0.55
+ATTACK_COST_TURN_WEIGHT = 0.50
 SNIPE_COST_TURN_WEIGHT = 0.42
 INDIRECT_VALUE_SCALE = 0.15
 INDIRECT_FRIENDLY_WEIGHT = 0.35
@@ -66,8 +66,8 @@ INDIRECT_ENEMY_WEIGHT = 1.25
 STATIC_NEUTRAL_VALUE_MULT = 1.45
 STATIC_HOSTILE_VALUE_MULT = 1.70
 ROTATING_OPENING_VALUE_MULT = 0.92
-HOSTILE_TARGET_VALUE_MULT = 1.85
-OPENING_HOSTILE_TARGET_VALUE_MULT = 1.45
+HOSTILE_TARGET_VALUE_MULT = 2.10
+OPENING_HOSTILE_TARGET_VALUE_MULT = 1.60
 SAFE_NEUTRAL_VALUE_MULT = 1.22
 CONTESTED_NEUTRAL_VALUE_MULT = 0.65
 EARLY_NEUTRAL_VALUE_MULT = 1.25
@@ -76,7 +76,7 @@ SNIPE_VALUE_MULT = 1.15
 SWARM_VALUE_MULT = 1.08
 REINFORCE_VALUE_MULT = 1.40
 CRASH_EXPLOIT_VALUE_MULT = 1.20
-FINISHING_HOSTILE_VALUE_MULT = 1.15
+FINISHING_HOSTILE_VALUE_MULT = 1.35
 BEHIND_ROTATING_NEUTRAL_VALUE_MULT = 0.88
 EXPOSED_PLANET_VALUE_MULT = 2.05
 WEAKEST_ENEMY_VALUE_MULT_4P = 1.55
@@ -85,18 +85,18 @@ GANG_UP_VALUE_MULT = 1.45
 # Margins
 SAFE_NEUTRAL_MARGIN = 2
 CONTESTED_NEUTRAL_MARGIN = 2
-NEUTRAL_MARGIN_BASE = 1
-NEUTRAL_MARGIN_PROD_WEIGHT = 1
-NEUTRAL_MARGIN_CAP = 5
-HOSTILE_MARGIN_BASE = 2
-HOSTILE_MARGIN_PROD_WEIGHT = 1
-HOSTILE_MARGIN_CAP = 8
+NEUTRAL_MARGIN_BASE = 2
+NEUTRAL_MARGIN_PROD_WEIGHT = 2
+NEUTRAL_MARGIN_CAP = 8
+HOSTILE_MARGIN_BASE = 3
+HOSTILE_MARGIN_PROD_WEIGHT = 2
+HOSTILE_MARGIN_CAP = 12
 HOSTILE_REINFORCE_HORIZON = 8
 HOSTILE_REINFORCE_RATIO = 0.25
 HOSTILE_REINFORCE_CAP = 15
-STATIC_TARGET_MARGIN = 2
-CONTESTED_TARGET_MARGIN = 3
-FOUR_PLAYER_TARGET_MARGIN = 1
+STATIC_TARGET_MARGIN = 4
+CONTESTED_TARGET_MARGIN = 5
+FOUR_PLAYER_TARGET_MARGIN = 2
 LONG_TRAVEL_MARGIN_START = 18
 LONG_TRAVEL_MARGIN_DIVISOR = 3
 LONG_TRAVEL_MARGIN_CAP = 8
@@ -129,8 +129,8 @@ FOUR_SOURCE_MIN_TARGET_SHIPS = 40
 FOUR_SOURCE_PLAN_PENALTY = 0.91
 
 # Speed boost
-SPEED_BOOST_MIN_SHIPS = 15
-SPEED_BOOST_RATIO = 1.06
+SPEED_BOOST_MIN_SHIPS = 8
+SPEED_BOOST_RATIO = 1.10
 
 # Reinforcement
 REINFORCE_ENABLED = True
@@ -142,7 +142,7 @@ REINFORCE_MIN_FUTURE_TURNS = 40
 
 # Defense
 PROACTIVE_DEFENSE_HORIZON = 12
-PROACTIVE_DEFENSE_RATIO = 0.18
+PROACTIVE_DEFENSE_RATIO = 0.28
 MULTI_ENEMY_PROACTIVE_HORIZON = 14
 MULTI_ENEMY_PROACTIVE_RATIO = 0.35
 MULTI_ENEMY_STACK_WINDOW = 4
@@ -156,16 +156,16 @@ CRASH_EXPLOIT_POST_CRASH_DELAY = 1
 # Elimination
 LATE_IMMEDIATE_SHIP_VALUE = 0.80
 WEAK_ENEMY_THRESHOLD = 110
-ELIMINATION_BONUS = 18.0
+ELIMINATION_BONUS = 60.0
 
 # Domination thresholds
 BEHIND_DOMINATION = -0.20
 AHEAD_DOMINATION = 0.15
 FINISHING_DOMINATION = 0.28
 FINISHING_PROD_RATIO = 1.15
-AHEAD_ATTACK_MARGIN_BONUS = 0.10
-BEHIND_ATTACK_MARGIN_PENALTY = 0.05
-FINISHING_ATTACK_MARGIN_BONUS = 0.08
+AHEAD_ATTACK_MARGIN_BONUS = 0.14
+BEHIND_ATTACK_MARGIN_PENALTY = 0.06
+FINISHING_ATTACK_MARGIN_BONUS = 0.14
 
 # Total war
 TOTAL_WAR_DEFENSE_CUT = 0.5
@@ -814,59 +814,7 @@ class WorldModel:
         self.shot_cache[key] = result
         return result
 
-    def probe_ship_candidates(self, src_id, target_id, source_cap, hints=()):
-        """Generate candidate ship counts for multi-probe targeting."""
-        source_cap = max(1, int(source_cap))
-        target = self.planet_by_id[target_id]
-        target_ships = max(1, int(math.ceil(target.ships)))
-
-        values = set(range(1, min(6, source_cap) + 1))
-        values.update({
-            source_cap,
-            max(1, source_cap // 2),
-            max(1, source_cap // 3),
-            min(source_cap, PARTIAL_SOURCE_MIN_SHIPS),
-            min(source_cap, target_ships + 1),
-            min(source_cap, target_ships + 2),
-            min(source_cap, target_ships + 4),
-            min(source_cap, target_ships + 8),
-        })
-        for hint in hints:
-            base = max(1, min(source_cap, int(math.ceil(hint))))
-            for delta in (-2, -1, 0, 1, 2):
-                candidate = base + delta
-                if 1 <= candidate <= source_cap:
-                    values.add(candidate)
-        return sorted(values)
-
-    def best_probe_aim(self, src_id, target_id, source_cap, hints=(), anchor_turn=None, max_anchor_diff=None):
-        """Try multiple ship counts, return (ships, aim) with best arrival time."""
-        cache_key = (src_id, target_id, max(1, int(source_cap)), tuple(hints), anchor_turn, max_anchor_diff)
-        if cache_key in self.shot_cache:
-            return self.shot_cache[cache_key]
-
-        best = None
-        best_key = None
-        for ships in self.probe_ship_candidates(src_id, target_id, source_cap, hints=hints):
-            aim = self.plan_shot(src_id, target_id, ships)
-            if aim is None:
-                continue
-            angle, turns, _, _ = aim
-            if anchor_turn is not None and max_anchor_diff is not None:
-                if abs(turns - anchor_turn) > max_anchor_diff:
-                    continue
-            if anchor_turn is None:
-                key = (turns, ships)
-            else:
-                key = (abs(turns - anchor_turn), turns, ships)
-            if best_key is None or key < best_key:
-                best_key = key
-                best = (ships, aim)
-        self.shot_cache[cache_key] = best
-        return best
-
     def ships_needed_to_capture(self, target_id, arrival_turn, planned_commitments=None):
-        """Binary search for exact minimum ships to own target at arrival_turn."""
         planned_commitments = planned_commitments or {}
         cutoff = max(1, int(math.ceil(arrival_turn)))
         arrivals = [x for x in self.arrivals_by_planet.get(target_id, []) if x[0] <= cutoff]
@@ -874,34 +822,11 @@ class WorldModel:
             if x[0] <= cutoff:
                 arrivals.append(x)
         target = self.planet_by_id[target_id]
-
-        def owns_with_ships(ships):
-            test_arrivals = arrivals + [(arrival_turn, self.player, int(ships))]
-            tl = simulate_planet_timeline(target, test_arrivals, self.player, cutoff)
-            owner, _ = state_at_timeline(tl, cutoff)
-            return owner == self.player
-
-        # Quick check: do we already own it?
         tl = simulate_planet_timeline(target, arrivals, self.player, cutoff)
         owner, ships = state_at_timeline(tl, cutoff)
         if owner == self.player:
             return 0
-
-        # Binary search for exact minimum
-        hi = max(1, int(math.ceil(ships)) + 1)
-        search_cap = int(target.ships) + cutoff * int(target.production) + 10
-        while hi <= search_cap and not owns_with_ships(hi):
-            hi *= 2
-        hi = min(hi, search_cap)
-
-        lo = 1
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if owns_with_ships(mid):
-                hi = mid
-            else:
-                lo = mid + 1
-        return lo if owns_with_ships(lo) else lo + 1
+        return int(math.ceil(ships)) + 1
 
     def reaction_times(self, target_id):
         target = self.planet_by_id[target_id]
@@ -1102,7 +1027,9 @@ def preferred_send(target, base_needed, arrival_turns, src_available, world, mod
         if boosted <= src_available:
             total = boosted
 
-    return min(src_available, total)
+    # Multi-mission cap: allow sources to participate in multiple missions
+    per_mission_cap = max(base_needed + 2, int(src_available * 0.50))
+    return min(src_available, min(total, per_mission_cap))
 
 
 def apply_score_modifiers(base_score, target, mission, world):
@@ -1120,79 +1047,6 @@ def apply_score_modifiers(base_score, target, mission, world):
     elif mission == "swarm":
         score *= SWARM_SCORE_MULT
     return score
-
-
-# ═══════════════════════════════════════════
-# SETTLE PLAN — Iterative ship-count refinement
-# ═══════════════════════════════════════════
-def settle_plan(src, target, src_cap, send_guess, world, planned_commitments, modes, mission="capture", anchor_turn=None, anchor_tolerance=None, max_iter=4):
-    """Iteratively refine ship count to find optimal send amount.
-    Returns (angle, turns, needed, send) or None.
-    """
-    if src_cap < 1:
-        return None
-
-    seed_hint = max(1, min(src_cap, int(send_guess)))
-    tested = {}
-
-    def evaluate(send):
-        send = max(1, min(src_cap, int(send)))
-        if send in tested:
-            return tested[send]
-        aim = world.plan_shot(src.id, target.id, send)
-        if aim is None:
-            tested[send] = None
-            return None
-        angle, turns, _, _ = aim
-        needed = world.ships_needed_to_capture(target.id, turns, planned_commitments)
-        tested[send] = (angle, turns, needed, send)
-        return tested[send]
-
-    # Initial evaluation
-    result = evaluate(seed_hint)
-    if result is None:
-        return None
-
-    best_send = seed_hint
-    best_result = result
-
-    # Iterative refinement
-    for _ in range(max_iter):
-        angle, turns, needed, send = best_result
-
-        # If we're sending way more than needed, try less
-        if needed > 0 and send > needed * 2:
-            candidate = max(needed, send // 2)
-            r = evaluate(candidate)
-            if r is not None and r[1] <= turns + 1:
-                best_send = candidate
-                best_result = r
-                continue
-
-        # If we're not sending enough, try more
-        if needed > send:
-            candidate = min(src_cap, needed + 2)
-            r = evaluate(candidate)
-            if r is not None:
-                best_send = candidate
-                best_result = r
-                continue
-
-        # Try neighbors
-        for delta in [-2, -1, 1, 2]:
-            candidate = max(1, min(src_cap, send + delta))
-            if candidate == send:
-                continue
-            r = evaluate(candidate)
-            if r is None:
-                continue
-            # Prefer fewer ships if arrival time is the same
-            if r[1] <= turns and r[3] < best_result[3]:
-                best_send = candidate
-                best_result = r
-        break
-
-    return best_result
 
 
 # ═══════════════════════════════════════════
@@ -1278,82 +1132,6 @@ def build_reinforcement_missions(world, planned, modes):
     return missions
 
 
-def build_rescue_missions(world, planned, modes):
-    """Build missions to rescue planets that will fall before we can reinforce."""
-    missions = []
-    for target in world.my_planets:
-        tl = world.base_timeline.get(target.id)
-        if tl is None:
-            continue
-        fall_turn = tl.get("fall_turn")
-        if fall_turn is None or fall_turn > 28:
-            continue
-        for src in world.my_planets:
-            if src.id == target.id:
-                continue
-            src_available = world.available.get(src.id, 0)
-            if src_available < PARTIAL_SOURCE_MIN_SHIPS:
-                continue
-            aim = world.plan_shot(src.id, target.id, max(PARTIAL_SOURCE_MIN_SHIPS, min(src_available, int(target.ships) + 4)))
-            if aim is None:
-                continue
-            angle, turns, _, _ = aim
-            if turns > fall_turn:
-                continue
-            need = world.ships_needed_to_capture(target.id, turns, planned)
-            if need <= 0:
-                need = 2
-            send = min(src_available, need + 2)
-            if send < need:
-                continue
-            saved_turns = max(1, world.remaining_steps - fall_turn)
-            value = target.production * saved_turns + max(0, target.ships) * 0.55
-            score = value / (send + turns * 0.4 + 1.0) * 1.35
-            option = ShotOption(score=score, src_id=src.id, target_id=target.id, angle=angle, turns=turns, needed=need, send_cap=send, mission="rescue")
-            missions.append(Mission(kind="rescue", score=score, target_id=target.id, turns=fall_turn, options=[option]))
-    return missions
-
-
-def build_recapture_missions(world, planned, modes):
-    """Build missions to retake planets that will fall, arriving after the fall."""
-    missions = []
-    for target in world.my_planets:
-        tl = world.base_timeline.get(target.id)
-        if tl is None:
-            continue
-        fall_turn = tl.get("fall_turn")
-        if fall_turn is None or fall_turn > 28:
-            continue
-        for src in world.my_planets:
-            if src.id == target.id:
-                continue
-            src_available = world.available.get(src.id, 0)
-            if src_available < PARTIAL_SOURCE_MIN_SHIPS:
-                continue
-            # Must arrive AFTER fall_turn
-            need = world.ships_needed_to_capture(target.id, fall_turn + 10, planned)
-            if need <= 0:
-                continue
-            send = min(src_available, need + 4)
-            aim = world.plan_shot(src.id, target.id, send)
-            if aim is None:
-                continue
-            angle, turns, _, _ = aim
-            if turns <= fall_turn or turns - fall_turn > 10:
-                continue
-            saved_turns = max(1, world.remaining_steps - turns)
-            value = 0.6 * target.production * saved_turns + 0.4 * max(0, target.ships)
-            if world.enemy_planets:
-                min_dist = min(math.hypot(target.x - e.x, target.y - e.y) for e in world.enemy_planets)
-                if min_dist < 22:
-                    value *= 1.08
-            value *= 0.88
-            score = value / (send + turns * 0.52 + 1.0)
-            option = ShotOption(score=score, src_id=src.id, target_id=target.id, angle=angle, turns=turns, needed=need, send_cap=send, mission="recapture")
-            missions.append(Mission(kind="recapture", score=score, target_id=target.id, turns=turns, options=[option]))
-    return missions
-
-
 def build_crash_exploit_missions(world, planned, modes):
     if not world.enemy_crashes:
         return []
@@ -1426,12 +1204,6 @@ def plan_moves(world, deadline=None):
     # ── Phase 1: Reinforcement missions ──
     reinforce_missions = build_reinforcement_missions(world, planned_commitments, modes)
     missions.extend(reinforce_missions)
-
-    # ── Phase 1b: Rescue and recapture missions ──
-    rescue_missions = build_rescue_missions(world, planned_commitments, modes)
-    missions.extend(rescue_missions)
-    recapture_missions = build_recapture_missions(world, planned_commitments, modes)
-    missions.extend(recapture_missions)
 
     # ── Phase 2: Crash exploit missions (4P) ──
     crash_missions = build_crash_exploit_missions(world, planned_commitments, modes)
@@ -1728,236 +1500,6 @@ def plan_moves(world, deadline=None):
 
 
 # ═══════════════════════════════════════════
-# BEAM SEARCH OPENING (from Marco DG v3.3, 1060.5 ELO)
-# ═══════════════════════════════════════════
-EAM_OPENING_LIMIT = 50
-EAM_MAX_MY_PLANETS = 6
-EAM_DEFENSE_LOOKAHEAD = 15
-PLAN_DEPTH = 5
-PLAN_BEAM_WIDTH = 8
-PLAN_MAX_EXTRA_WAIT = 15
-
-
-def _plan_best_launch(src_id, src_planet, ref_ships, ref_prod, ref_time, target, world, R):
-    G = int(target.ships)
-    if ref_prod <= 0 and ref_ships < G + 1:
-        return None
-    if ref_ships >= G + 1:
-        t_min = ref_time
-    else:
-        need = G + 1 - ref_ships
-        t_min = ref_time + int(math.ceil(need / max(1, ref_prod)))
-    best = None
-    src_static = is_static_planet(src_planet)
-
-    for extra in range(0, PLAN_MAX_EXTRA_WAIT + 1):
-        t = t_min + extra
-        if t >= R:
-            break
-        fleet = ref_ships + ref_prod * (t - ref_time)
-        if fleet < G + 1:
-            continue
-        speed = fleet_speed(fleet)
-        if src_static or t == 0:
-            sx, sy = src_planet.x, src_planet.y
-        else:
-            sx, sy = predict_planet_position(src_planet, world.initial_by_id, world.ang_vel, t)
-        eta = dist(sx, sy, target.x, target.y) / speed
-        for _ in range(8):
-            px, py = predict_planet_position(target, world.initial_by_id, world.ang_vel, t + eta)
-            new_eta = dist(sx, sy, px, py) / speed
-            if abs(new_eta - eta) < 0.05:
-                eta = new_eta
-                break
-            eta = new_eta
-        cap_t = t + eta
-        if cap_t >= R:
-            continue
-        if best is None or cap_t < best["cap_t"]:
-            best = {"t_launch": t, "fleet": int(fleet), "eta": eta, "cap_t": cap_t}
-        if extra > 5 and cap_t > best["cap_t"] + 1.0:
-            break
-    return best
-
-
-def _enemy_earliest_capture(target, world):
-    best = float("inf")
-    G = int(target.ships)
-    for attacker in range(world.num_players):
-        if attacker == world.player:
-            continue
-        theirs = [p for p in world.planets if p.owner == attacker]
-        if not theirs:
-            continue
-        for src in theirs:
-            S = int(src.ships)
-            p_rate = int(src.production)
-            for W in range(0, 40):
-                fleet = S + p_rate * W
-                if fleet < G + 1:
-                    continue
-                speed = fleet_speed(fleet)
-                eta = dist(src.x, src.y, target.x, target.y) / speed
-                for _ in range(2):
-                    px, py = predict_planet_position(target, world.initial_by_id, world.ang_vel, W + eta)
-                    eta = dist(src.x, src.y, px, py) / speed
-                t = W + eta
-                if t < best:
-                    best = t
-                if W > 5 and t > best:
-                    break
-    return best
-
-
-def _plan_evaluate(plan, world, enemy_earliest=None):
-    R = world.remaining_steps
-    sources = {}
-    for planet in world.my_planets:
-        sources[planet.id] = (int(planet.ships), int(planet.production), 0)
-
-    in_flight_captures = set()
-    for pid, arrivals in world.arrivals_by_planet.items():
-        planet = world.planet_by_id.get(pid)
-        if planet is None or planet.owner == world.player:
-            continue
-        friendly = sorted(
-            [(eta, ships) for eta, owner, ships in arrivals if owner == world.player],
-            key=lambda x: x[0],
-        )
-        if not friendly:
-            continue
-        garrison = int(planet.ships)
-        cumulative = 0
-        for eta, ships in friendly:
-            cumulative += ships
-            if cumulative > garrison:
-                residual = cumulative - garrison
-                sources[pid] = (residual, int(planet.production), eta)
-                in_flight_captures.add(pid)
-                break
-
-    V = 0.0
-    moves = []
-    for src_id, tgt_id in plan:
-        if src_id not in sources:
-            return None
-        if tgt_id == src_id:
-            return None
-        ref_ships, ref_prod, ref_t = sources[src_id]
-        src_planet = world.planet_by_id[src_id]
-        target = world.planet_by_id[tgt_id]
-        already_captured_in_plan = {t for _, t in plan[:len(moves)]}
-        if target.owner == world.player and tgt_id not in already_captured_in_plan:
-            return None
-        if tgt_id in in_flight_captures and tgt_id not in already_captured_in_plan:
-            return None
-        launch = _plan_best_launch(src_id, src_planet, ref_ships, ref_prod, ref_t, target, world, R)
-        if launch is None:
-            return None
-        if enemy_earliest is not None and tgt_id in enemy_earliest:
-            if enemy_earliest[tgt_id] < launch["cap_t"] - 0.5:
-                return None
-        V += int(target.production) * (R - launch["cap_t"])
-        moves.append({
-            "src_id": src_id, "tgt_id": tgt_id,
-            "t_launch": launch["t_launch"], "fleet": launch["fleet"],
-            "eta": launch["eta"], "cap_t": launch["cap_t"],
-            "production": int(target.production),
-        })
-        sources[src_id] = (0, ref_prod, launch["t_launch"])
-        residual = max(0, launch["fleet"] - int(target.ships))
-        sources[tgt_id] = (residual, int(target.production), launch["cap_t"])
-    return {"V": V, "moves": moves}
-
-
-def _plan_beam_search(world, depth=PLAN_DEPTH, beam_width=PLAN_BEAM_WIDTH, deadline=None):
-    player = world.player
-    all_targets = [p for p in world.planets if p.owner != player]
-    if not all_targets:
-        return None
-
-    enemy_earliest = {t.id: _enemy_earliest_capture(t, world) for t in all_targets}
-    initial_sources = {p.id for p in world.my_planets}
-    plans = [{"plan": [], "V": 0.0, "moves": []}]
-
-    for _ in range(depth):
-        if deadline is not None and time.perf_counter() >= deadline:
-            break
-        new_plans = []
-        for entry in plans:
-            if deadline is not None and time.perf_counter() >= deadline:
-                break
-            prev_plan = entry["plan"]
-            used_tgts = {tid for _, tid in prev_plan}
-            avail_sources = set(initial_sources) | used_tgts
-            for src_id in avail_sources:
-                for tgt in all_targets:
-                    if tgt.id in used_tgts or tgt.id == src_id:
-                        continue
-                    new_plan = prev_plan + [(src_id, tgt.id)]
-                    res = _plan_evaluate(new_plan, world, enemy_earliest=enemy_earliest)
-                    if res is None:
-                        continue
-                    new_plans.append({"plan": new_plan, "V": res["V"], "moves": res["moves"]})
-        if not new_plans:
-            break
-        seen = {}
-        for p in new_plans:
-            key = tuple(p["plan"])
-            if key not in seen or p["V"] > seen[key]["V"]:
-                seen[key] = p
-        plans = sorted(seen.values(), key=lambda x: -x["V"])[:beam_width]
-
-    if not plans:
-        return None
-    return max(plans, key=lambda x: x["V"])
-
-
-def eam_choose_moves(world):
-    if world.step >= EAM_OPENING_LIMIT:
-        return None
-    if world.is_four_player:
-        return None
-    if len(world.my_planets) > EAM_MAX_MY_PLANETS:
-        return None
-    for planet in world.my_planets:
-        tl = world.base_timeline.get(planet.id)
-        if tl is not None:
-            fall = tl.get("fall_turn")
-            if fall is not None and fall < EAM_DEFENSE_LOOKAHEAD:
-                return None
-
-    n = len(world.my_planets)
-    if n == 1:
-        depth = 5
-    elif n == 2:
-        depth = 4
-    elif n <= 4:
-        depth = 3
-    else:
-        depth = 2
-
-    plan_deadline = time.perf_counter() + 0.8
-    best = _plan_beam_search(world, depth=depth, beam_width=PLAN_BEAM_WIDTH, deadline=plan_deadline)
-    if best is None or not best["moves"]:
-        return None
-
-    moves = []
-    for commit in best["moves"]:
-        if commit["t_launch"] > 0:
-            continue
-        src = world.planet_by_id[commit["src_id"]]
-        ships = min(int(commit["fleet"]), int(src.ships))
-        if ships <= 0:
-            continue
-        shot = world.plan_shot(src.id, commit["tgt_id"], ships)
-        if shot is None:
-            continue
-        moves.append([src.id, float(shot[0]), ships])
-    return moves
-
-
-# ═══════════════════════════════════════════
 # AGENT ENTRY POINT (with cross-game state reset)
 # ═══════════════════════════════════════════
 _prev_step = -1
@@ -1999,10 +1541,4 @@ def agent(obs, config=None):
     deadline = start_time + min(SOFT_ACT_DEADLINE, max(0.55, act_timeout * 0.82))
 
     world = WorldModel(player, step, planets, fleets, initial_by_id, ang_vel, comets, comet_ids)
-
-    # Beam search opening: plan multi-capture chains for the first 50 turns
-    eam_result = eam_choose_moves(world)
-    if eam_result is not None:
-        return eam_result
-
     return plan_moves(world, deadline=deadline)

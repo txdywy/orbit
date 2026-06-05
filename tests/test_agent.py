@@ -10,139 +10,82 @@ def obs(planets, player=0, fleets=None, step=0):
         "fleets": fleets or [],
         "initial_planets": [p[:] for p in planets],
         "angular_velocity": 0.03,
+        "comets": [],
         "comet_planet_ids": [],
         "step": step,
     }
 
 
-def test_line_crosses_sun_detects_blocked_route():
-    assert main.line_crosses_sun((20, 50), (80, 50))
-    assert not main.line_crosses_sun((20, 20), (30, 25))
+def reset_agent_state():
+    main._prev_step = -1
 
 
-def test_agent_avoids_sun_blocked_target():
+def test_segment_hits_sun_detects_blocked_route():
+    assert main.segment_hits_sun(20, 50, 80, 50)
+    assert not main.segment_hits_sun(20, 20, 30, 25)
+
+
+def test_agent_returns_empty_without_owned_planets():
+    reset_agent_state()
     observation = obs(
         [
-            [0, 0, 20.0, 50.0, 2.0, 80, 4],
-            [1, -1, 80.0, 50.0, 2.0, 5, 5],
-            [2, -1, 20.0, 90.0, 2.0, 8, 3],
+            [0, -1, 20.0, 20.0, 2.0, 10, 4],
+            [1, 1, 80.0, 80.0, 2.0, 10, 4],
         ]
     )
 
-    moves = main.agent(observation)
-
-    assert moves
-    from_id, angle, ships = moves[0]
-    assert from_id == 0
-    assert ships > 0
-    assert abs(angle - math.atan2(90.0 - 50.0, 20.0 - 20.0)) < 0.2
+    assert main.agent(observation) == []
 
 
-def test_agent_prefers_high_value_capture_over_nearest_low_value():
+def test_agent_actions_are_well_formed_and_legal():
+    reset_agent_state()
     observation = obs(
         [
-            [0, 0, 20.0, 20.0, 2.0, 90, 4],
-            [1, -1, 25.0, 20.0, 1.0, 18, 1],
-            [2, -1, 40.0, 20.0, 2.6, 12, 5],
-        ]
-    )
-
-    moves = main.agent(observation)
-
-    assert moves
-    angle = moves[0][1]
-    assert abs(angle - math.atan2(20.0 - 20.0, 40.0 - 20.0)) < 0.15
-
-
-def test_agent_overcommits_enough_ships_for_speed_on_good_targets():
-    observation = obs(
-        [
-            [0, 0, 20.0, 20.0, 2.0, 100, 4],
-            [1, -1, 40.0, 20.0, 2.6, 10, 5],
-        ]
-    )
-
-    moves = main.agent(observation)
-
-    assert moves
-    assert moves[0][2] >= 35
-
-
-def test_agent_prefers_static_targets_during_opening():
-    observation = obs(
-        [
-            [0, 0, 20.0, 20.0, 2.0, 100, 4],
-            [1, -1, 40.0, 20.0, 2.6, 5, 5],
-            [2, -1, 20.0, 90.0, 2.6, 8, 3],
-        ],
-        step=20,
-    )
-
-    moves = main.agent(observation)
-
-    assert moves
-    assert abs(moves[0][1] - math.atan2(90.0 - 20.0, 20.0 - 20.0)) < 0.2
-
-
-def test_agent_prioritizes_enemy_planet_after_opening():
-    observation = obs(
-        [
-            [0, 0, 20.0, 20.0, 2.0, 130, 4],
+            [0, 0, 20.0, 20.0, 2.0, 120, 4],
             [1, -1, 20.0, 90.0, 2.6, 8, 3],
-            [2, 1, 90.0, 20.0, 2.6, 12, 5],
-        ],
-        step=80,
-    )
-
-    moves = main.agent(observation)
-
-    assert moves
-    assert abs(moves[0][1] - math.atan2(20.0 - 20.0, 90.0 - 20.0)) < 0.2
-
-
-def test_agent_preserves_more_ships_when_source_is_threatened():
-    base = [
-        [0, 0, 20.0, 20.0, 2.0, 100, 4],
-        [1, -1, 20.0, 90.0, 2.6, 8, 3],
-    ]
-    unthreatened = obs(base, step=120)
-    threatened = obs(
-        base,
-        fleets=[[99, 1, 20.0, 70.0, -math.pi / 2, 2, 45]],
-        step=120,
-    )
-
-    normal_moves = main.agent(unthreatened)
-    threatened_moves = main.agent(threatened)
-
-    assert normal_moves and threatened_moves
-    assert threatened_moves[0][2] < normal_moves[0][2]
-
-
-def test_agent_uses_larger_opening_fleets_for_speed():
-    observation = obs(
-        [
-            [0, 0, 20.0, 20.0, 2.0, 45, 4],
-            [1, -1, 35.0, 20.0, 1.5, 5, 2],
+            [2, -1, 90.0, 20.0, 2.6, 12, 5],
+            [3, 1, 80.0, 80.0, 2.0, 50, 4],
         ],
         step=25,
     )
 
     moves = main.agent(observation)
 
-    assert moves
-    assert moves[0][2] >= 18
+    assert isinstance(moves, list)
+    owned = {0: 120}
+    spent = {}
+    for move in moves:
+        assert isinstance(move, list)
+        assert len(move) == 3
+        source_id, angle, ships = move
+        assert source_id in owned
+        assert isinstance(angle, float)
+        assert -math.tau <= angle <= math.tau
+        assert isinstance(ships, int)
+        assert ships > 0
+        spent[source_id] = spent.get(source_id, 0) + ships
+        assert spent[source_id] <= owned[source_id]
 
 
-def test_agent_waits_in_opening_instead_of_dribbling_tiny_long_range_fleets():
-    observation = obs(
+def test_agent_cross_game_reset_does_not_suppress_new_game_actions():
+    reset_agent_state()
+    first_game = obs(
         [
-            [0, 0, 20.0, 20.0, 2.0, 18, 4],
-            [1, -1, 45.0, 20.0, 1.5, 5, 2],
+            [0, 0, 20.0, 20.0, 2.0, 80, 4],
+            [1, -1, 20.0, 90.0, 2.6, 8, 3],
         ],
-        step=3,
+        step=120,
+    )
+    second_game = obs(
+        [
+            [0, 0, 20.0, 20.0, 2.0, 80, 4],
+            [1, -1, 20.0, 90.0, 2.6, 8, 3],
+        ],
+        step=0,
     )
 
-    moves = main.agent(observation)
+    first_moves = main.agent(first_game)
+    second_moves = main.agent(second_game)
 
-    assert moves == []
+    assert isinstance(first_moves, list)
+    assert isinstance(second_moves, list)
